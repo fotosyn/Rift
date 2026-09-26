@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>RIFT — slit-scan camera</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- Live camera preview + fixed centre slit guide -->
+    <div id="live-view">
+      <video id="camera" autoplay muted playsinline></video>
+      <div id="slit-guide"></div>
+      <div id="camera-message" class="message hidden"></div>
+    </div>
+
+    <!-- Growing / final slit-scan image -->
+    <div id="output-view">
+      <canvas id="output-canvas"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls">
+      <button id="scan-btn" disabled>SCAN</button>
+      <button id="reset-btn" class="hidden">RESET</button>
+      <a id="save-link" class="hidden" download="rift-scan.png">SAVE</a>
+    </div>
+
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

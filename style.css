@@ -1,0 +1,131 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: #eee;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100vw;
+}
+
+/* Live camera preview: takes most of the screen so the photographer can
+   see what is about to cross the slit. */
+#live-view {
+  position: relative;
+  flex: 1 1 55%;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+#camera {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Visual guide only — purely cosmetic, has no effect on the actual
+   sampled column (that is computed from real video pixel dimensions
+   in js/slitscan.js, not from this element's screen position). */
+#slit-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
+.message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.85);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Output: the slit-scan image being built, growing left to right.
+   Horizontally scrollable so long scans aren't clipped, and we keep it
+   auto-scrolled to the growing edge in js/main.js. */
+#output-view {
+  flex: 1 1 45%;
+  min-height: 0;
+  background: #111;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 1px solid #333;
+  display: flex;
+  align-items: center;
+}
+
+#output-canvas {
+  height: 100%;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+#controls {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: #000;
+  border-top: 1px solid #222;
+}
+
+#controls button,
+#controls a {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border: none;
+  border-radius: 10px;
+  background: #eee;
+  color: #000;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#controls button:disabled {
+  opacity: 0.35;
+}
+
+#scan-btn.scanning {
+  background: #d33;
+  color: #fff;
+}
