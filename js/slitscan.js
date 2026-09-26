@@ -14,8 +14,13 @@
 
 // --- Tunable algorithm parameters (hard-coded for v0.1; see PORTING.md) ---
 const SLIT_WIDTH_SRC_PX = 3;        // width of the sampled source column, in source video pixels
-const OUTPUT_COLUMN_WIDTH_PX = 2;   // width the sampled strip is scaled to in the output image
 const MAX_OUTPUT_WIDTH_PX = 6000;   // pre-allocated output canvas width; scan auto-stops when full
+
+// RATE (v0.2): output growth is now driven by elapsed TIME, not by "one
+// column per callback" — see PORTING.md "RATE". This is the RATE value
+// that reproduces v0.1's original fixed-2px-per-frame behaviour at a
+// typical ~30fps camera frame delivery rate (2px * 30fps = 60px/s).
+export const DEFAULT_OUTPUT_PIXELS_PER_SECOND = 60;
 
 export class SlitScan {
   constructor(sourceVideo, outputCanvas) {
@@ -23,6 +28,7 @@ export class SlitScan {
     this.outputCanvas = outputCanvas;
     this.ctx = outputCanvas.getContext('2d', { alpha: false });
     this.cursorX = 0;
+    this.lastSampleTimeMs = null;
   }
 
   /**
@@ -38,6 +44,7 @@ export class SlitScan {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, this.outputCanvas.width, this.outputCanvas.height);
     this.cursorX = 0;
+    this.lastSampleTimeMs = null;
   }
 
   isFull() {
@@ -46,15 +53,43 @@ export class SlitScan {
 
   /**
    * Samples the current video frame's centre vertical strip and appends
-   * it as the next column(s) of the output image. Returns false if there
-   * was nothing to sample (no frame yet, or output already full).
+   * it as the next column of the output image.
+   *
+   * `mediaTimeMs` is the video frame's own presentation timestamp (video
+   * timeline time, in ms) rather than wall-clock time, so the resulting
+   * scan speed reflects real elapsed capture time and is not distorted by
+   * a dropped or delayed JS callback — see PORTING.md "RATE".
+   *
+   * `outputPixelsPerSecond` (RATE) is the only thing that changed for
+   * v0.2: it replaces v0.1's fixed per-callback column width with a
+   * column width proportional to elapsed time, so total scan speed no
+   * longer depends on how many callbacks the browser happens to deliver.
+   *
+   * Returns false if there was nothing to sample (no frame yet, or
+   * output already full).
    */
-  sampleFrame() {
+  sampleFrame(mediaTimeMs, outputPixelsPerSecond) {
     if (this.isFull()) return false;
 
     const sourceWidth = this.video.videoWidth;
     const sourceHeight = this.video.videoHeight;
     if (!sourceWidth || !sourceHeight) return false;
+
+    // First sample of a scan has no prior timestamp to measure elapsed
+    // time against, so it seeds the clock and contributes no width yet.
+    if (this.lastSampleTimeMs === null) {
+      this.lastSampleTimeMs = mediaTimeMs;
+      return true;
+    }
+
+    const elapsedMs = mediaTimeMs - this.lastSampleTimeMs;
+    this.lastSampleTimeMs = mediaTimeMs;
+    if (elapsedMs <= 0) return true; // duplicate/out-of-order timestamp; skip
+
+    let dw = Math.round(outputPixelsPerSecond * (elapsedMs / 1000));
+    const remaining = MAX_OUTPUT_WIDTH_PX - this.cursorX;
+    if (dw <= 0) return true;
+    if (dw > remaining) dw = remaining;
 
     // Fixed centre column — deliberately never tracks motion or content.
     const sx = Math.round(sourceWidth / 2 - SLIT_WIDTH_SRC_PX / 2);
@@ -64,17 +99,16 @@ export class SlitScan {
 
     const dx = this.cursorX;
     const dy = 0;
-    const dw = OUTPUT_COLUMN_WIDTH_PX;
     const dh = sourceHeight;
 
-    // Scaling the sampled strip to OUTPUT_COLUMN_WIDTH_PX controls how
-    // much horizontal space one moment in time occupies in the final
-    // image; SLIT_WIDTH_SRC_PX is independent and controls how much of
-    // the sensor contributes to that moment (wider = more temporal
-    // smearing per sample).
+    // Scaling the sampled strip to dw (derived from RATE * elapsed time)
+    // controls how much horizontal space this moment in time occupies in
+    // the final image; SLIT_WIDTH_SRC_PX is independent and untouched by
+    // RATE — it controls how much of the sensor contributes to that
+    // moment (wider = more temporal smearing per sample), not scan speed.
     this.ctx.drawImage(this.video, sx, sy, sw, sh, dx, dy, dw, dh);
 
-    this.cursorX += OUTPUT_COLUMN_WIDTH_PX;
+    this.cursorX += dw;
     return true;
   }
 

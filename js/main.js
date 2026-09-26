@@ -3,7 +3,7 @@
 // sample loop while scanning, and hands off the result for export.
 
 import { startCamera } from './camera.js';
-import { SlitScan } from './slitscan.js';
+import { SlitScan, DEFAULT_OUTPUT_PIXELS_PER_SECOND } from './slitscan.js';
 
 const videoEl = document.getElementById('camera');
 const messageEl = document.getElementById('camera-message');
@@ -12,12 +12,30 @@ const outputView = document.getElementById('output-view');
 const scanBtn = document.getElementById('scan-btn');
 const resetBtn = document.getElementById('reset-btn');
 const saveLink = document.getElementById('save-link');
+const rateSlider = document.getElementById('rate-slider');
+const rateValueEl = document.getElementById('rate-value');
 
 let stream = null;
 let slitScan = null;
 let scanning = false;
 let rvfcHandle = null;
 let rafHandle = null;
+
+// RATE: output pixels per second of real elapsed capture time (see
+// PORTING.md "RATE"). The slider's default reproduces v0.1's original
+// behaviour as closely as possible.
+rateSlider.value = String(DEFAULT_OUTPUT_PIXELS_PER_SECOND);
+updateRateLabel();
+
+function currentRate() {
+  return Number(rateSlider.value);
+}
+
+function updateRateLabel() {
+  rateValueEl.textContent = `${currentRate()} px/s`;
+}
+
+rateSlider.addEventListener('input', updateRateLabel);
 
 function showMessage(text) {
   messageEl.textContent = text;
@@ -54,10 +72,17 @@ function scheduleNextSample() {
   }
 }
 
-function onFrame() {
+function onFrame(now, metadata) {
   if (!scanning) return;
 
-  const stillHasRoom = slitScan.sampleFrame();
+  // Prefer the frame's own media timeline timestamp (metadata.mediaTime,
+  // seconds) over wall-clock time so scan speed reflects actual capture
+  // time rather than whatever cadence the browser happens to callback at.
+  // rAF's fallback timestamp is already a wall-clock DOMHighResTimeStamp
+  // in ms, which is the best time source available in that path.
+  const mediaTimeMs = metadata ? metadata.mediaTime * 1000 : now;
+
+  const stillHasRoom = slitScan.sampleFrame(mediaTimeMs, currentRate());
   autoScrollOutput();
 
   if (!stillHasRoom) {

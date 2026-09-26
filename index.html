@@ -22,6 +22,13 @@
       <canvas id="output-canvas"></canvas>
     </div>
 
+    <!-- RATE: experimental control over output pixels/second (scan speed).
+         See PORTING.md "RATE". -->
+    <div id="rate-control">
+      <label for="rate-slider">RATE <span id="rate-value"></span></label>
+      <input type="range" id="rate-slider" min="15" max="240" step="1">
+    </div>
+
     <!-- Controls -->
     <div id="controls">
       <button id="scan-btn" disabled>SCAN</button>
