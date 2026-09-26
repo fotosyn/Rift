@@ -22,6 +22,17 @@ const MAX_OUTPUT_WIDTH_PX = 6000;   // pre-allocated output canvas width; scan a
 // typical ~30fps camera frame delivery rate (2px * 30fps = 60px/s).
 export const DEFAULT_OUTPUT_PIXELS_PER_SECOND = 60;
 
+// Ceiling on how much elapsed time a single sample may convert into output
+// width. Without this, a single abnormally large gap between two frames'
+// timestamps (e.g. camera autofocus stall, brief tab backgrounding, a
+// delayed callback) would dump a correspondingly huge slice of width into
+// one draw call — potentially consuming most of the output canvas in one
+// step and ending the scan almost immediately. 200ms is generous next to
+// a normal ~33ms frame interval (comfortably covers a missed frame or two)
+// while bounding the damage from a genuine anomaly. This does not smooth
+// or alter the sampled image content — it only bounds one timestamp delta.
+const MAX_ELAPSED_MS_PER_SAMPLE = 200;
+
 export class SlitScan {
   constructor(sourceVideo, outputCanvas) {
     this.video = sourceVideo;
@@ -82,9 +93,10 @@ export class SlitScan {
       return true;
     }
 
-    const elapsedMs = mediaTimeMs - this.lastSampleTimeMs;
+    let elapsedMs = mediaTimeMs - this.lastSampleTimeMs;
     this.lastSampleTimeMs = mediaTimeMs;
     if (elapsedMs <= 0) return true; // duplicate/out-of-order timestamp; skip
+    if (elapsedMs > MAX_ELAPSED_MS_PER_SAMPLE) elapsedMs = MAX_ELAPSED_MS_PER_SAMPLE;
 
     let dw = Math.round(outputPixelsPerSecond * (elapsedMs / 1000));
     const remaining = MAX_OUTPUT_WIDTH_PX - this.cursorX;

@@ -155,6 +155,15 @@ identical structure to the JS above, but with a presentation timestamp
 that is authoritative (frame-accurate, hardware-derived) rather than a
 best-effort browser API.
 
+**Per-sample elapsed time is capped at 200ms** (`MAX_ELAPSED_MS_PER_SAMPLE`
+in `js/slitscan.js`) before being converted to output width. Without this,
+one abnormally large gap between two frames' timestamps (autofocus stall,
+brief backgrounding, a delayed callback) would convert into a
+correspondingly huge slice of output width in a single draw, which could
+exhaust the 6000px canvas — and end the scan — almost immediately. This
+does not smooth or alter sampled image content; it only bounds how much
+one timestamp gap can contribute.
+
 **Compromises made because of Safari**: the 60 px/s "default = v0.1
 behaviour" figure assumes a ~30fps camera delivery rate, which is
 Safari's typical but not guaranteed rate on iPhone — actual device frame
