@@ -118,7 +118,7 @@ slider, range **15–240**, default **60**.
 **Effect on destination coordinates**: for each sampled frame,
 
 ```
-elapsedMs = frame.mediaTime - previousFrame.mediaTime
+elapsedMs = callback.now - previousCallback.now
 dw = round(outputPixelsPerSecond * elapsedMs / 1000)
 output.x = cursorX .. cursorX + dw
 cursorX += dw
@@ -132,18 +132,27 @@ unaffected by RATE.
 **Does RATE depend on camera/frame callback frequency?** No, by design —
 that was the specific failure mode this change corrects. Instead of one
 fixed-width column per callback (which made v0.1's implicit px/s rate a
-function of frame delivery rate), `dw` scales with the *elapsed time*
-between frames' presentation timestamps
-(`VideoFrameCallbackMetadata.mediaTime`, from
-`requestVideoFrameCallback`). Whether the camera or main thread delivers
-24, 30, or 60 callbacks per second, the same RATE value produces the same
-total output width for the same elapsed capture duration — a dropped
-frame just makes the next `dw` larger (covering the missed time), not a
-change in overall image speed. The one exception is the `requestAnimationFrame`
-fallback path (browsers without `requestVideoFrameCallback`), which has no
-media timestamp to read and falls back to wall-clock `performance.now()`
-via the rAF callback's own timestamp — still time-based, just using
-display time instead of media time.
+function of frame delivery rate), `dw` scales with the *elapsed wall-clock
+time* between callbacks, using each callback's own `now` argument
+(a DOMHighResTimeStamp, from `requestVideoFrameCallback` or
+`requestAnimationFrame`). Whether the camera or main thread delivers 24,
+30, or 60 callbacks per second, the same RATE value produces the same
+total output width for the same elapsed duration — a dropped frame just
+makes the next `dw` larger (covering the missed time, up to the cap
+below), not a change in overall image speed.
+
+Note this deliberately does **not** use
+`VideoFrameCallbackMetadata.mediaTime` (the frame's media-timeline
+presentation timestamp), despite that being the more "correct" time
+source in principle. In testing, WebKit's `mediaTime` proved unreliable
+for a live `getUserMedia` camera stream (as opposed to a file-backed
+`<video>`) — it did not reliably advance, which made every elapsed-time
+computation read as ~zero and silently stopped the output from growing
+at all. `now` (wall-clock) has no such dependency on the media timeline
+and is reliable across both the `requestVideoFrameCallback` and
+`requestAnimationFrame` paths. This is a **known browser limitation**,
+not a native-port concern — see "Reproducing this in Swift" below, where
+`CMSampleBuffer` presentation timestamps do not have this problem.
 
 **Reproducing this in Swift with `AVCaptureVideoDataOutput`**: each
 `CMSampleBuffer` carries a presentation timestamp via

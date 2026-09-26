@@ -72,17 +72,18 @@ function scheduleNextSample() {
   }
 }
 
-function onFrame(now, metadata) {
+function onFrame(now) {
   if (!scanning) return;
 
-  // Prefer the frame's own media timeline timestamp (metadata.mediaTime,
-  // seconds) over wall-clock time so scan speed reflects actual capture
-  // time rather than whatever cadence the browser happens to callback at.
-  // rAF's fallback timestamp is already a wall-clock DOMHighResTimeStamp
-  // in ms, which is the best time source available in that path.
-  const mediaTimeMs = metadata ? metadata.mediaTime * 1000 : now;
-
-  const stillHasRoom = slitScan.sampleFrame(mediaTimeMs, currentRate());
+  // `now` (both callbacks' first argument) is a plain, always-advancing
+  // DOMHighResTimeStamp (ms). We deliberately do NOT use
+  // metadata.mediaTime from requestVideoFrameCallback here: for a live
+  // getUserMedia camera stream (as opposed to a file-backed <video>),
+  // WebKit's mediaTime is unreliable and can fail to advance at all,
+  // which would make every elapsed-time computation read as zero and
+  // silently stop the output from growing. `now` has no such dependency
+  // on the media timeline.
+  const stillHasRoom = slitScan.sampleFrame(now, currentRate());
   autoScrollOutput();
 
   if (!stillHasRoom) {

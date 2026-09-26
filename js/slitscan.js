@@ -66,10 +66,13 @@ export class SlitScan {
    * Samples the current video frame's centre vertical strip and appends
    * it as the next column of the output image.
    *
-   * `mediaTimeMs` is the video frame's own presentation timestamp (video
-   * timeline time, in ms) rather than wall-clock time, so the resulting
-   * scan speed reflects real elapsed capture time and is not distorted by
-   * a dropped or delayed JS callback — see PORTING.md "RATE".
+   * `nowMs` is a wall-clock DOMHighResTimeStamp (ms) from the sampling
+   * callback (requestVideoFrameCallback's or requestAnimationFrame's own
+   * `now` argument) — not the media timeline's mediaTime, which is
+   * unreliable for live getUserMedia camera streams in WebKit and can
+   * fail to advance at all. Using elapsed real time between callbacks
+   * still means scan speed isn't a simple function of callback count —
+   * see PORTING.md "RATE".
    *
    * `outputPixelsPerSecond` (RATE) is the only thing that changed for
    * v0.2: it replaces v0.1's fixed per-callback column width with a
@@ -79,7 +82,7 @@ export class SlitScan {
    * Returns false if there was nothing to sample (no frame yet, or
    * output already full).
    */
-  sampleFrame(mediaTimeMs, outputPixelsPerSecond) {
+  sampleFrame(nowMs, outputPixelsPerSecond) {
     if (this.isFull()) return false;
 
     const sourceWidth = this.video.videoWidth;
@@ -89,12 +92,12 @@ export class SlitScan {
     // First sample of a scan has no prior timestamp to measure elapsed
     // time against, so it seeds the clock and contributes no width yet.
     if (this.lastSampleTimeMs === null) {
-      this.lastSampleTimeMs = mediaTimeMs;
+      this.lastSampleTimeMs = nowMs;
       return true;
     }
 
-    let elapsedMs = mediaTimeMs - this.lastSampleTimeMs;
-    this.lastSampleTimeMs = mediaTimeMs;
+    let elapsedMs = nowMs - this.lastSampleTimeMs;
+    this.lastSampleTimeMs = nowMs;
     if (elapsedMs <= 0) return true; // duplicate/out-of-order timestamp; skip
     if (elapsedMs > MAX_ELAPSED_MS_PER_SAMPLE) elapsedMs = MAX_ELAPSED_MS_PER_SAMPLE;
 
