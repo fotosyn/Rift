@@ -24,6 +24,7 @@ permission, point the rear camera at something moving, tap **SCAN**, tap
 - `style.css` — minimal dark UI.
 - `js/camera.js` — camera acquisition (`getUserMedia`) only.
 - `js/slitscan.js` — the slit-scan algorithm (sampling + accumulation). No DOM/UI code.
+- `js/motion.js` — SCAN-mode horizontal motion estimator (v0.3).
 - `js/main.js` — wiring: button states, sample loop, export.
 - `PORTING.md` — the algorithm described for a native Swift/AVFoundation/Core Image port.
 

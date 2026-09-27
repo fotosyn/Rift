@@ -15,6 +15,8 @@
       <video id="camera" autoplay muted playsinline></video>
       <div id="slit-guide"></div>
       <div id="camera-message" class="message hidden"></div>
+      <!-- Temporary SCAN-mode engineering diagnostics (v0.3 experiment). -->
+      <div id="debug-overlay" class="hidden"></div>
     </div>
 
     <!-- Growing / final slit-scan image -->
@@ -25,6 +27,12 @@
     <!-- RATE: experimental control over output pixels/second (scan speed).
          See PORTING.md "RATE". -->
     <div id="rate-control">
+      <!-- Capture mode: TIME = output advances with elapsed time (RATE);
+           SCAN = output advances with measured camera pan (v0.3 experiment). -->
+      <div id="mode-toggle">
+        <button id="mode-time" class="active">TIME</button>
+        <button id="mode-scan">SCAN</button>
+      </div>
       <label for="rate-slider">RATE <span id="rate-value"></span></label>
       <input type="range" id="rate-slider" min="15" max="240" step="1">
     </div>

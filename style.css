@@ -117,6 +117,57 @@ html, body {
   color: #eee;
 }
 
+#mode-toggle {
+  flex: 0 0 auto;
+  display: flex;
+}
+
+#mode-toggle button {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border: 1px solid #444;
+  background: #000;
+  color: #888;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#mode-toggle button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+#mode-toggle button:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+#mode-toggle button.active {
+  background: #eee;
+  color: #000;
+}
+
+#mode-toggle button:disabled {
+  opacity: 0.4;
+}
+
+/* In SCAN mode the slider doesn't drive transport, so it is hidden. */
+#rate-control.scan-mode label,
+#rate-control.scan-mode #rate-slider {
+  visibility: hidden;
+}
+
+#debug-overlay {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  left: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  font: 12px/1.35 ui-monospace, Menlo, monospace;
+  white-space: pre;
+  pointer-events: none;
+}
+
 #rate-slider {
   flex: 1 1 auto;
   width: 100%;

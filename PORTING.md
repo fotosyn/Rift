@@ -1,4 +1,4 @@
-# RIFT v0.1/v0.2 — Porting Notes
+# RIFT v0.1–v0.3 — Porting Notes
 
 This document describes the slit-scan photograph pipeline in
 platform-independent terms, so it can be re-implemented natively (Swift /
@@ -183,18 +183,142 @@ output speed. This was judged acceptable per the brief ("as closely as
 possible") rather than adding frame-rate detection, which would be a
 larger change.
 
+## SCAN capture model (v0.3, experimental)
+
+RIFT now has two capture modes. They sample **exactly the same slit**
+(fixed centre column, `SLIT_WIDTH_SRC_PX` wide, full height) and differ
+only in how far the output advances per frame:
+
+- **TIME** — output advances by elapsed time × RATE (v0.2, unchanged).
+  Stationary camera; moving subjects are shaped by time.
+- **SCAN** — output advances by the *measured horizontal travel of the
+  scene* across the sensor. The photographer pans; a stationary camera
+  produces (almost) no output.
+
+The metaphor: **fixed optical slit + moving camera + displacement-
+controlled film transport** — a strip camera whose film speed is slaved to
+image motion. It is not a panorama: no stitching, blending, warping or
+perspective correction, and only the centre slit is ever written into the
+photograph. The motion estimator only decides transport distance.
+
+### Algorithm (platform-independent)
+
+Per camera frame:
+
+1. **Frame acquisition** — one estimate per delivered frame, on the same
+   callback that samples the slit. Consecutive frames are compared; if a
+   frame is dropped, the next comparison simply sees a larger shift (no
+   timestamp maths needed while it stays inside the search range).
+2. **Timestamp handling** — displacement is per-frame, so SCAN transport
+   does not use time at all. Timestamps (callback `now`) are used only for
+   the diagnostic FPS readout (exponential moving average of
+   `1000 / Δt`), so irregular callback spacing is visible as it really is.
+3. **Comparison region** — centred rectangle, **60% of frame width × 50% of
+   frame height** (portrait 1080×1920 → 648×960 source px). Broad enough
+   to contain texture; the 3 px slit alone is not.
+4. **Downsample** — region scaled to **160 × 60** estimator pixels
+   (portrait: ≈4.05 source px per estimator px horizontally). The resample
+   also low-passes sensor noise.
+5. **Luminance** — Rec. 601 luma `Y = 0.299R + 0.587G + 0.114B`, then the
+   buffer mean is subtracted (zero-mean) so auto-exposure drift during a
+   pan doesn't bias the match.
+6. **Horizontal search** — integer shifts `s ∈ [−24, +24]` estimator px
+   (portrait ≈ ±97 source px/frame ≈ 2.7 frame widths/s at 30 fps).
+   Minimum overlap is 136/160 columns (85%). No vertical search.
+7. **Error metric** — mean absolute difference over the overlapping
+   columns: `E(s) = mean |prev[x] − cur[x + s]|`. Mean, not sum, because
+   the overlap shrinks as |s| grows.
+8. **Sub-pixel refinement** — parabola through `E(best−1), E(best),
+   E(best+1)`: `s += 0.5·(E₋ − E₊) / (E₋ − 2E₀ + E₊)`, clamped to ±0.5.
+   Needed because one estimator px ≈ 4 source px: integer shifts alone
+   would quantise slow pans to 0 or 4 px/frame.
+9. **Confidence test** — the frame contributes **no advance** if any of:
+   - `flat`: mean |horizontal gradient| of the current buffer < 1.5
+     (luma 0–255) — blank wall, heavy blur, darkness;
+   - `edge`: best shift is at ±24 — true motion probably out of range;
+   - `poor`: best error > 20 — scene changed too much to trust;
+   - `ambig`: best error / second-best error > 0.85, where second-best is
+     the lowest error at least 3 estimator px from the best — repeating
+     patterns or broad, featureless minima.
+   Rule of thumb: weak evidence → no transport, never a guessed jump.
+10. **Dead zone** — |s| < 0.35 estimator px (≈1.4 source px, portrait) is
+    treated as stationary (`still`) and contributes nothing, so sensor
+    noise and hand tremor don't creep the output.
+11. **Displacement scaling** — `panSourcePx = −s × (regionSourceWidth / 160)`.
+    Scene content moving left (s < 0) means the camera is panning right.
+    Output pixels are 1:1 with source pixels (vertical is 1:1 already), so
+    `panSourcePx` is directly the output advance that keeps proportions
+    natural. An estimator pixel is **never** treated as a source pixel.
+12. **Fractional accumulation** — `acc += panSourcePx; dw = floor(acc);
+    acc −= dw`. Slow pans (e.g. 0.4 px/frame) still advance 2 px every 5
+    frames rather than being rounded away. Reset at the start of each scan.
+13. **Output advancement** — if `dw > 0`, the fixed centre slit of the
+    *current* frame is stretched into `dw` output columns at `cursorX`
+    (same draw as TIME). At fast pans a 3 px slice fills many columns,
+    producing visible horizontal streaking — this is the slit-scan
+    construction showing, and is intentionally not filled in from
+    neighbouring source columns (that would be panorama stitching).
+14. **Direction handling** — the sign is computed and displayed
+    (+ = pan right). v0.3 **builds only on rightward pan**; leftward pan is
+    measured but contributes nothing (the accumulator is untouched).
+    Writing leftward pans right-to-left un-mirrored needs a different
+    canvas origin and crop, deferred rather than rewriting accumulation.
+
+### Moving subjects
+
+The estimator cannot tell camera motion from subject motion, by design.
+A subject filling a large part of the estimator region pulls the estimate
+toward its own motion: with a stationary camera, a person walking left
+through the frame reads as a rightward pan and *drives the transport* —
+SCAN briefly becomes subject-coupled. A small subject is outvoted by the
+background. Partial occlusion can also trip `poor` / `ambig`, pausing
+transport. None of this is corrected.
+
+### Likely native implementation
+
+| Step | Browser (v0.3) | Native iOS candidate |
+|------|----------------|----------------------|
+| Frames | `getUserMedia` + `requestVideoFrameCallback` | `AVCaptureSession` + `AVCaptureVideoDataOutput` delegate |
+| Timestamps | callback `now` (diagnostic only) | `CMSampleBufferGetPresentationTimeStamp` |
+| Region + downsample | `drawImage` into 160×60 canvas | `CVPixelBuffer` Y plane (already luma in 420f/420v) + `vImageScale_Planar8` (Accelerate), or Core Image `CILanczosScaleTransform` |
+| Readback | `getImageData` (GPU→CPU sync) | direct `CVPixelBufferGetBaseAddress` on the Y plane — no RGB→luma step |
+| Search | JS loops over `Float32Array` | `vDSP` (Accelerate), or a Metal compute kernel computing all 49 SADs in parallel |
+| Strip append | `drawImage` into canvas | Metal blit/compute into a persistent `MTLTexture` |
+
+Natively the algorithm could run at full frame rate at higher estimator
+resolution (e.g. 320 px wide) for finer sub-pixel accuracy. The JS is the
+reference for behaviour, not the production architecture.
+
+### Future: optical vs. gyroscope
+
+Native RIFT should eventually compare this optical estimate with Core
+Motion (`CMDeviceMotion.rotationRate`, yaw about the device's vertical
+axis). Gyro pan converts to image displacement via the lens's focal length
+in pixels (`Δx ≈ f_px · Δθ`), and is immune to blank walls, repeated
+patterns and moving subjects — but it measures *camera rotation*, not
+*image motion*, so it ignores subjects entirely and drifts over time. A
+hybrid (gyro for robustness, optical for fine correction and for the
+deliberately "wrong" subject-coupled behaviour) may prove best. Not
+implemented: v0.3 specifically tests how much the image alone can tell us.
+
 ## Parameters (candidates for future creative controls)
 
-All currently hard-coded in `js/slitscan.js`, except RATE (see above),
-which is now UI-exposed:
+All currently hard-coded (`js/slitscan.js`, `js/motion.js`), except RATE
+and the TIME/SCAN mode, which are UI-exposed:
 
-| Parameter               | v0.1/v0.2 value | Effect                                                  |
+| Parameter               | Value | Effect                                                  |
 |--------------------------|-----------------|----------------------------------------------------------|
+| capture mode             | TIME / SCAN (v0.3) | What drives transport: elapsed time, or measured pan |
 | `SLIT_WIDTH_SRC_PX`       | 3               | Width of sampled source column (motion blur / smearing per sample) |
-| `outputPixelsPerSecond` (RATE) | 60 default, 15–240 range | How fast the output grows through time (image "speed") — **UI-exposed in v0.2** |
+| `outputPixelsPerSecond` (RATE) | 60 default, 15–240 range | TIME only: how fast the output grows through time — **UI-exposed in v0.2** |
+| estimator region          | 60% × 50% of frame, centred | SCAN: what the motion estimate "looks at" |
+| estimator size            | 160 × 60        | SCAN: precision vs. cost |
+| `MAX_SHIFT`               | ±24 estimator px | SCAN: fastest trackable pan |
+| `DEAD_ZONE_EST_PX`        | 0.35            | SCAN: stillness threshold (tremor rejection) |
+| confidence thresholds     | tex 1.5, err 20, amb 0.85 | SCAN: how readily transport pauses on doubtful frames |
 | `MAX_OUTPUT_WIDTH_PX`     | 6000            | Maximum output width / scan duration cap                 |
 | sampling rate             | 1 per video frame (rVFC or rAF) | How often the slit is read |
-| scan direction            | left → right, fixed | Not exposed; always time-forward, always left-to-right |
+| scan direction            | left → right, fixed | Not exposed; TIME always time-forward; SCAN builds on rightward pan only |
 | slit position              | frame horizontal centre, fixed | Not exposed; only centre-slit supported |
 | output resolution (height)| native `videoHeight` | Vertical fidelity of the photograph |
 
@@ -204,6 +328,10 @@ which is now UI-exposed:
   browser decodes frames into a `<video>` element and we sample from
   that decoded output rather than a raw `CMSampleBuffer`-equivalent. This
   is fine for v0.1 but adds a decode step a native pipeline wouldn't need.
+- **SCAN pixel readback**: the browser can only read frame pixels by
+  drawing to a canvas and calling `getImageData` (a GPU→CPU sync, plus an
+  RGB→luma conversion in JS). Native code reads the camera's luma plane
+  directly. This is why the estimator is kept to 160×60.
 - **`requestVideoFrameCallback` availability**: only Safari 15.4+; older
   WebKit falls back to `requestAnimationFrame`, decoupling sampling from
   actual camera frame delivery (display refresh rate instead).

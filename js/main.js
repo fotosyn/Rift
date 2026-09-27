@@ -4,6 +4,7 @@
 
 import { startCamera } from './camera.js';
 import { SlitScan, DEFAULT_OUTPUT_PIXELS_PER_SECOND } from './slitscan.js';
+import { createMotionEstimator } from './motion.js';
 
 const videoEl = document.getElementById('camera');
 const messageEl = document.getElementById('camera-message');
@@ -14,12 +15,37 @@ const resetBtn = document.getElementById('reset-btn');
 const saveLink = document.getElementById('save-link');
 const rateSlider = document.getElementById('rate-slider');
 const rateValueEl = document.getElementById('rate-value');
+const rateControl = document.getElementById('rate-control');
+const modeTimeBtn = document.getElementById('mode-time');
+const modeScanBtn = document.getElementById('mode-scan');
+const debugOverlay = document.getElementById('debug-overlay');
 
 let stream = null;
 let slitScan = null;
 let scanning = false;
 let rvfcHandle = null;
 let rafHandle = null;
+
+// Capture mode: 'time' (output advances with elapsed time at RATE) or
+// 'scan' (output advances with estimated camera pan). Fixed for a scan.
+let mode = 'time';
+const motion = createMotionEstimator();
+
+// Diagnostics only (SCAN overlay). FPS comes from the callbacks' own
+// timestamps, so irregular callback spacing shows up as it really is.
+let lastFrameNow = null;
+let fpsEma = 0;
+let estimateMsEma = 0;
+
+function setMode(next) {
+  mode = next;
+  modeTimeBtn.classList.toggle('active', mode === 'time');
+  modeScanBtn.classList.toggle('active', mode === 'scan');
+  rateControl.classList.toggle('scan-mode', mode === 'scan');
+}
+
+modeTimeBtn.addEventListener('click', () => setMode('time'));
+modeScanBtn.addEventListener('click', () => setMode('scan'));
 
 // RATE: output pixels per second of real elapsed capture time (see
 // PORTING.md "RATE"). The slider's default reproduces v0.1's original
@@ -83,7 +109,21 @@ function onFrame(now) {
   // which would make every elapsed-time computation read as zero and
   // silently stop the output from growing. `now` has no such dependency
   // on the media timeline.
-  const stillHasRoom = slitScan.sampleFrame(now, currentRate());
+  if (lastFrameNow !== null && now > lastFrameNow) {
+    fpsEma = ema(fpsEma, 1000 / (now - lastFrameNow));
+  }
+  lastFrameNow = now;
+
+  let stillHasRoom;
+  if (mode === 'scan') {
+    const t0 = performance.now();
+    const m = motion.estimate(videoEl);
+    estimateMsEma = ema(estimateMsEma, performance.now() - t0);
+    stillHasRoom = slitScan.sampleFrameByDisplacement(m.panSourcePx);
+    showDiagnostics(m);
+  } else {
+    stillHasRoom = slitScan.sampleFrame(now, currentRate());
+  }
   autoScrollOutput();
 
   if (!stillHasRoom) {
@@ -92,6 +132,24 @@ function onFrame(now) {
   }
 
   scheduleNextSample();
+}
+
+function ema(prev, value) {
+  return prev === 0 ? value : prev * 0.9 + value * 0.1;
+}
+
+// Temporary engineering readout. Δ is the RAW signed pan estimate in source
+// pixels per frame (+ = panning right, the direction that builds); the
+// status says whether it was actually applied ('ok') or why not.
+function showDiagnostics(m) {
+  const sign = m.rawPanSourcePx >= 0 ? '+' : '';
+  // A confident leftward pan is measured but doesn't build in v0.3.
+  const status = m.status === 'ok' && m.rawPanSourcePx < 0 ? 'rev' : m.status;
+  debugOverlay.textContent =
+    `Δ ${sign}${m.rawPanSourcePx.toFixed(1)} px/f  ${status}\n` +
+    `~${fpsEma.toFixed(0)} fps  est ${estimateMsEma.toFixed(1)} ms\n` +
+    `err ${m.error.toFixed(1)}  amb ${m.ambiguity.toFixed(2)}  tex ${m.texture.toFixed(1)}\n` +
+    `${videoEl.videoWidth}×${videoEl.videoHeight}  1e=${m.sourcePerEst.toFixed(2)}px  x ${slitScan.cursorX}`;
 }
 
 function autoScrollOutput() {
@@ -108,6 +166,14 @@ function autoScrollOutput() {
 
 function startScan() {
   scanning = true;
+  motion.reset();
+  lastFrameNow = null;
+  fpsEma = 0;
+  estimateMsEma = 0;
+  modeTimeBtn.disabled = true;
+  modeScanBtn.disabled = true;
+  debugOverlay.textContent = '';
+  debugOverlay.classList.toggle('hidden', mode !== 'scan');
   scanBtn.textContent = 'STOP';
   scanBtn.classList.add('scanning');
   resetBtn.classList.add('hidden');
@@ -141,6 +207,9 @@ function exportResult() {
 
 function reset() {
   slitScan.prepare();
+  modeTimeBtn.disabled = false;
+  modeScanBtn.disabled = false;
+  debugOverlay.classList.add('hidden');
   outputView.scrollLeft = 0;
   scanBtn.disabled = false;
   scanBtn.textContent = 'SCAN';
